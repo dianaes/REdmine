@@ -1,0 +1,222 @@
+diff -ur /root/timesheet/redmine-timesheet-plugin/app/helpers/timesheet_helper.rb vendor/plugins/timesheet_plugin/app/helpers/timesheet_helper.rb
+--- /root/timesheet/redmine-timesheet-plugin/app/helpers/timesheet_helper.rb	2010-09-01 14:30:07.000000000 +0400
++++ vendor/plugins/timesheet_plugin/app/helpers/timesheet_helper.rb	2010-10-12 17:35:50.000000000 +0400
+@@ -3,6 +3,15 @@
+     l(:timesheet_showing_users) + users.collect(&:name).join(', ')
+   end
+ 
++  def avg_score(entry, for_issues = false)
++    #damn!
++    if for_issues
++      Issue.avg_score(entry[:issues].keys.map(&:id))
++    else
++      Issue.avg_score(entry[:logs].map(&:issue_id))
++    end
++  end
++
+   def permalink_to_timesheet(timesheet)
+     link_to(l(:timesheet_permalink),
+             :controller => 'timesheet',
+diff -ur /root/timesheet/redmine-timesheet-plugin/app/models/timesheet.rb vendor/plugins/timesheet_plugin/app/models/timesheet.rb
+--- /root/timesheet/redmine-timesheet-plugin/app/models/timesheet.rb	2010-09-01 14:30:07.000000000 +0400
++++ vendor/plugins/timesheet_plugin/app/models/timesheet.rb	2010-09-03 14:41:17.000000000 +0400
+@@ -113,7 +113,7 @@
+       :projects => projects.collect(&:id),
+       :date_from => date_from,
+       :date_to => date_to,
+-      :activities => activities,
++      #:activities => activities,
+       :users => users,
+       :sort => sort
+     }
+@@ -152,10 +152,11 @@
+                 '#',
+                 I18n.t(:label_date),
+                 I18n.t(:label_member),
+-                I18n.t(:label_activity),
++#                I18n.t(:label_activity),
+                 I18n.t(:label_project),
+                 I18n.t(:label_issue),
+-                I18n.t(:field_comments),
++#                I18n.t(:field_comments),
++                I18n.t(:field_notes),
+                 I18n.t(:field_hours)
+                ]
+     Redmine::Hook.call_hook(:plugin_timesheet_model_timesheet_csv_header, { :timesheet => self, :csv_data => csv_data})
+@@ -167,10 +168,11 @@
+                 time_entry.id,
+                 time_entry.spent_on,
+                 time_entry.user.name,
+-                time_entry.activity.name,
++#                time_entry.activity.name,
+                 time_entry.project.name,
+                 ("#{time_entry.issue.tracker.name} ##{time_entry.issue.id}" if time_entry.issue),
+-                time_entry.comments,
++#                time_entry.comments,
++                time_entry.notes,
+                 time_entry.hours
+                ]
+     Redmine::Hook.call_hook(:plugin_timesheet_model_timesheet_time_entry_to_csv, { :timesheet => self, :time_entry => time_entry, :csv_data => csv_data})
+diff -ur /root/timesheet/redmine-timesheet-plugin/app/views/timesheet/_by_issue.rhtml vendor/plugins/timesheet_plugin/app/views/timesheet/_by_issue.rhtml
+--- /root/timesheet/redmine-timesheet-plugin/app/views/timesheet/_by_issue.rhtml	2010-09-01 14:30:07.000000000 +0400
++++ vendor/plugins/timesheet_plugin/app/views/timesheet/_by_issue.rhtml	2010-10-12 17:38:58.000000000 +0400
+@@ -9,8 +9,9 @@
+     <th width="10%"><%= l(:label_member) %></th>
+     <th width="45%"><%= l(:label_issue) %> / <%= l(:field_comments) %></th>
+     <th width="10%"><%= l(:field_hours) %>
++    <th width="10%"><%= l(:label_due_date) %> 
+     <%= Redmine::Hook.call_hook(:plugin_timesheet_views_timesheet_group_header, { }) %>
+-    <th align="center"></td>
++    <th align="center">&nbsp;</td>
+   </thead>
+   <tbody>
+     <%= render :partial => "issue_time_entries", :collection => entry[:issues] %>
+diff -ur /root/timesheet/redmine-timesheet-plugin/app/views/timesheet/_issue_time_entries.rhtml vendor/plugins/timesheet_plugin/app/views/timesheet/_issue_time_entries.rhtml
+--- /root/timesheet/redmine-timesheet-plugin/app/views/timesheet/_issue_time_entries.rhtml	2010-09-01 14:30:07.000000000 +0400
++++ vendor/plugins/timesheet_plugin/app/views/timesheet/_issue_time_entries.rhtml	2010-10-12 17:41:03.000000000 +0400
+@@ -11,7 +11,10 @@
+     </td>
+     <td align="center"></td>
+     <td align="center"><%= issue.assigned_to.to_s %></td>
+-    <td><%= link_to("##{issue.id}", :controller => 'issues', :action => 'show', :id => issue.id) %>: <%= h issue.subject %></td>
++    <td>
++      <%= link_to("##{issue.id}", :controller => 'issues', :action => 'show', :id => issue.id) %>: <%= h issue.subject %>,
++      <strong><%= l(:label_score) %></strong>: <%= number_with_precision(issue.score, @precision) %>
++    </td>
+     <td align="center"><strong><%= number_with_precision(displayed_time_entries_for_issue(time_entries), @precision) %></strong></td>
+     <%= Redmine::Hook.call_hook(:plugin_timesheet_views_timesheet_time_entry_sum, {:time_entries => time_entries, :precision => @precision }) %>
+     <td align="center"></td>
+@@ -27,6 +30,7 @@
+     <td align="center"><%= time_entry.user.name %></td>
+     <td><%= h time_entry.comments %></td>
+     <td align="center"><strong><%= number_with_precision(time_entry.hours, @precision) %></strong></td>
++    <td align="center"><%= time_entry.issue.due_date ? format_date(time_entry.issue.due_date) : l(:label_not_due) %></td> 
+     <%= Redmine::Hook.call_hook(:plugin_timesheet_views_timesheet_time_entry, {:time_entry => time_entry, :precision => @precision }) %>
+     <td align="center">
+       <% if time_entry.editable_by?(User.current) -%>
+@@ -36,7 +40,9 @@
+                                            :confirm => l(:text_are_you_sure),
+                                            :method => :post,
+                                            :title => l(:button_delete) %>
+-     <% end -%>
++      <% else -%>
++        &nbsp;
++      <% end -%>
+     </td>
+   </tr>
+ <% end %>
+diff -ur /root/timesheet/redmine-timesheet-plugin/app/views/timesheet/_time_entry.rhtml vendor/plugins/timesheet_plugin/app/views/timesheet/_time_entry.rhtml
+--- /root/timesheet/redmine-timesheet-plugin/app/views/timesheet/_time_entry.rhtml	2010-09-01 14:30:07.000000000 +0400
++++ vendor/plugins/timesheet_plugin/app/views/timesheet/_time_entry.rhtml	2010-10-12 17:19:35.000000000 +0400
+@@ -3,7 +3,6 @@
+     <td align="center"><%= check_box_tag 'ids[]', time_entry.id, false, { :class => 'checkbox' } %></td>
+     <td align="center"><%= format_date(time_entry.spent_on) %></td>
+     <td align="center"><%= time_entry.user.name %></td>
+-    <td align="center"><%= time_entry.activity.name %></td>
+     <td align="center"><%= time_entry.project.name %></td>
+     <td align="center">
+       <% if time_entry.issue %>
+@@ -15,7 +14,9 @@
+       </div>
+       <% end %>
+     </td>
+-    <td><%=h time_entry.comments %></td>
++    <td><%=h time_entry.notes %></td>
++    <td align="center"><%= number_with_precision time_entry.issue.score, @precision %></td>
++    <td align="center"><%= time_entry.issue.due_date ? format_date(time_entry.issue.due_date) : l(:label_not_due) %></td>
+     <td align="center"><strong><%= number_with_precision(time_entry.hours, @precision) %></strong></td>
+     <%= Redmine::Hook.call_hook(:plugin_timesheet_views_timesheet_time_entry, {:time_entry => time_entry, :precision => @precision }) %>
+     <td align="center">
+Only in vendor/plugins/timesheet_plugin/app/views/timesheet: _time_entry.rhtml.orig
+diff -ur /root/timesheet/redmine-timesheet-plugin/app/views/timesheet/_timesheet_group.rhtml vendor/plugins/timesheet_plugin/app/views/timesheet/_timesheet_group.rhtml
+--- /root/timesheet/redmine-timesheet-plugin/app/views/timesheet/_timesheet_group.rhtml	2010-09-01 14:30:07.000000000 +0400
++++ vendor/plugins/timesheet_plugin/app/views/timesheet/_timesheet_group.rhtml	2010-10-12 17:03:19.000000000 +0400
+@@ -6,10 +6,11 @@
+     </th>
+     <th width="8%"><%= l(:label_date) %></th>
+     <th width="10%"><%= l(:label_member) %></th>
+-    <th width="15%"><%= l(:label_activity) %></th>
+     <th width="15%"><%= l(:label_project) %></th>
+-    <th width="10%"><%= l(:label_issue) %></th>
+-    <th width="25%"><%= l(:field_comments) %></th>
++    <th width="35%"><%= l(:label_issue) %></th>
++    <th width="10%"><%= l(:field_notes) %></th>
++    <th width="10%"><%= l(:label_score) %>
++    <th width="10%"><%= l(:label_due_date) %>
+     <th width="10%"><%= l(:field_hours) %>
+     <%= Redmine::Hook.call_hook(:plugin_timesheet_views_timesheet_group_header, { }) %>
+     <th></th>
+Only in vendor/plugins/timesheet_plugin/app/views/timesheet: _timesheet_group.rhtml.orig
+diff -ur /root/timesheet/redmine-timesheet-plugin/app/views/timesheet/report.rhtml vendor/plugins/timesheet_plugin/app/views/timesheet/report.rhtml
+--- /root/timesheet/redmine-timesheet-plugin/app/views/timesheet/report.rhtml	2010-09-01 14:30:07.000000000 +0400
++++ vendor/plugins/timesheet_plugin/app/views/timesheet/report.rhtml	2010-10-12 17:37:14.000000000 +0400
+@@ -16,14 +16,14 @@
+ <% @timesheet.time_entries.each do |entryname,entry|
+     case @timesheet.sort
+     when :user %>
+-   <h3><%= h entryname -%> (<%= h number_with_precision(@total[entryname], @precision) %> <%= h(l(:field_hours)) -%>)</h3>
++   <h3><%= h entryname -%> (<%= h number_with_precision(@total[entryname], @precision) %> <%= h(l(:field_hours)) -%>), <%=h l(:label_score) %>: <%= number_with_precision avg_score(entry), @precision %></h3>
+    <%= render :partial => 'timesheet_group', :locals => {:entry => entry, :name => entryname, :total => @total[entryname] } %>
+ <% when :issue %>
+-   <h3><%= h entryname -%> (<%= h number_with_precision(@total[entryname], @precision) %> <%= h(l(:field_hours)) -%>)</h3>
++   <h3><%= h entryname -%> (<%= h number_with_precision(@total[entryname], @precision) %> <%= h(l(:field_hours)) -%>), <%=h l(:label_score) %>: <%= number_with_precision avg_score(entry, true), @precision %></h3>
+    <%= render :partial => 'by_issue', :locals => {:entry => entry, :name => entryname, :total => 0 } %>
+ <% else %>
+ <%# Default to :project %>
+-   <h3><%= h entryname -%> (<%= h number_with_precision(@total[entryname], @precision) %> <%= h(l(:field_hours)) -%>) <%= showing_users(entry[:users]) %></h3> 
++   <h3><%= h entryname -%> (<%= h number_with_precision(@total[entryname], @precision) %> <%= h(l(:field_hours)) -%>) <%= showing_users(entry[:users]) %>, <%=h l(:label_score) %>: <%= number_with_precision avg_score(entry), @precision %></h3> 
+    <%= render :partial => 'timesheet_group', :locals => {:entry => entry, :name => entryname, :total => @total[entryname] } %>
+ 
+ <% end
+diff -ur /root/timesheet/redmine-timesheet-plugin/config/locales/ru.yml vendor/plugins/timesheet_plugin/config/locales/ru.yml
+--- /root/timesheet/redmine-timesheet-plugin/config/locales/ru.yml	2010-09-01 14:30:07.000000000 +0400
++++ vendor/plugins/timesheet_plugin/config/locales/ru.yml	2010-10-13 14:59:21.000000000 +0400
+@@ -1,9 +1,13 @@
+ ru:
+-  timesheet_title: Сводная таблица затраченного времени
+-  timesheet_date_from_label: Начиная с
+-  timesheet_date_to_label: по
+-  timesheet_project_label: Проект
+-  timesheet_activities_label: Активность
+-  timesheet_users_label: Пользователи
+-  timesheet_permalink: '(Постоянная ссылка на эту таблицу)'
+-  timesheet_group_by: Группировать по
++    timesheet_title: Отчёт о времени
++    timesheet_date_from_label: Начиная с
++    timesheet_date_to_label: по
++    timesheet_project_label: Проект
++    timesheet_activities_label: Активность
++    timesheet_users_label: Пользователи
++    timesheet_showing_users: 'сводка для пользователя: '
++    timesheet_permalink: '(Постоянная ссылка на эту таблицу)'
++    timesheet_group_by: Группировать по
++    timesheet_project_key_custom_field_id_label: "Project custom field for the API key"
++    timesheet_server_settings_help: "Configure a custom field below to support per-project api keys."
++    timesheet_server_missing_custom_field: "Missing a '{{field_format}}' Custom Field for Projects.  Please create one first."
+\ No newline at end of file
+diff -ur /root/timesheet/redmine-timesheet-plugin/lang/ru.yml vendor/plugins/timesheet_plugin/lang/ru.yml
+--- /root/timesheet/redmine-timesheet-plugin/lang/ru.yml	2010-09-01 14:30:07.000000000 +0400
++++ vendor/plugins/timesheet_plugin/lang/ru.yml	2010-10-13 14:56:28.000000000 +0400
+@@ -1,8 +1,13 @@
+-timesheet_title: Сводная таблица затраченного времени
+-timesheet_date_from_label: Начиная с
+-timesheet_date_to_label: по
+-timesheet_project_label: Проект
+-timesheet_activities_label: Активность
+-timesheet_users_label: Пользователи
+-timesheet_permalink: '(Постоянная ссылка на эту таблицу)'
+-timesheet_group_by: Группировать по
++ru:
++    timesheet_title: Отчёт о времени
++    timesheet_date_from_label: Начиная с
++    timesheet_date_to_label: по
++    timesheet_project_label: Проект
++    timesheet_activities_label: Активность
++    timesheet_users_label: Пользователи
++    timesheet_showing_users: 'сводка для пользователя: '
++    timesheet_permalink: '(Постоянная ссылка на эту таблицу)'
++    timesheet_group_by: Группировать по
++    timesheet_project_key_custom_field_id_label: "Project custom field for the API key"
++    timesheet_server_settings_help: "Configure a custom field below to support per-project api keys."
++    timesheet_server_missing_custom_field: "Missing a '{{field_format}}' Custom Field for Projects.  Please create one first."
+\ No newline at end of file

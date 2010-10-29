@@ -1,0 +1,23 @@
+K 25
+svn:wc:ra_dav:version-url
+V 49
+/svn/redmine-favicon/!svn/ver/9/trunk/lib/favicon
+END
+layout_hooks.rb
+K 25
+svn:wc:ra_dav:version-url
+V 65
+/svn/redmine-favicon/!svn/ver/6/trunk/lib/favicon/layout_hooks.rb
+END
+application_helper_patch.rb
+K 25
+svn:wc:ra_dav:version-url
+V 77
+/svn/redmine-favicon/!svn/ver/9/trunk/lib/favicon/application_helper_patch.rb
+END
+themes_patch.rb
+K 25
+svn:wc:ra_dav:version-url
+V 65
+/svn/redmine-favicon/!svn/ver/3/trunk/lib/favicon/themes_patch.rb
+END
